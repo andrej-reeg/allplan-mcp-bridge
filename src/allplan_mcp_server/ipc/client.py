@@ -21,10 +21,23 @@ _RECONNECT_CAP = 5.0  # seconds
 class IpcError(Exception):
     """Base for IPC-level errors returned from the agent."""
 
-    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.details = details or {}
+        self.correlation_id = correlation_id or str(uuid.uuid4())
+
+    def __str__(self) -> str:
+        return f"{self.code}: {super().__str__()} [correlation_id: {self.correlation_id}]"
+
+
+_DEFAULT_MAX_ARG_BYTES = 1024 * 1024  # 1 MiB
 
 
 class IpcClient:
@@ -41,8 +54,13 @@ class IpcClient:
     resolve with ``IpcError(code="AgentDisconnected")`` on disconnect.
     """
 
-    def __init__(self, transport_factory: Callable[[], Transport]) -> None:
+    def __init__(
+        self,
+        transport_factory: Callable[[], Transport],
+        max_arg_bytes: int = _DEFAULT_MAX_ARG_BYTES,
+    ) -> None:
         self._factory = transport_factory
+        self._max_arg_bytes = max_arg_bytes
         self._transport: Transport | None = None
         self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._reader_task: asyncio.Task[None] | None = None
@@ -79,9 +97,18 @@ class IpcClient:
         """Send a command and await the response.
 
         Raises ``IpcError`` on agent-reported errors, timeouts, or disconnect.
+        Raises ``IpcError("InvalidArgs", ...)`` if args exceed the size cap.
         """
         if not self.is_connected:
             raise IpcError("AgentDisconnected", "Not connected to agent")
+
+        # Guard against pathological inputs before they hit the wire.
+        from ..security import ArgSizeTooLargeError, validate_arg_size
+
+        try:
+            validate_arg_size(args, self._max_arg_bytes)
+        except ArgSizeTooLargeError as exc:
+            raise IpcError("InvalidArgs", str(exc)) from exc
 
         req_id = str(uuid.uuid4())
         deadline_ms = int(timeout * 1000)
@@ -107,10 +134,20 @@ class IpcClient:
 
         if not response.get("ok"):
             err = response.get("error", {})
+            correlation_id = str(uuid.uuid4())
+            log.error(
+                "ipc.agent_error",
+                cmd=cmd,
+                code=err.get("code"),
+                message=err.get("message"),
+                details=err.get("details"),
+                correlation_id=correlation_id,
+            )
             raise IpcError(
                 err.get("code", "Internal"),
                 err.get("message", "Unknown error"),
                 err.get("details"),
+                correlation_id=correlation_id,
             )
 
         return dict(response.get("result") or {})

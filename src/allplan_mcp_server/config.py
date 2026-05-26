@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     long_op_timeout_seconds: float = 120.0
     allplan_workspace_root: Path
     log_level: str = "INFO"
+    max_frame_bytes: int = 16 * 1024 * 1024          # 16 MiB IPC frame cap
+    max_arg_bytes: int = 1024 * 1024                  # 1 MiB per-tool argument cap
+    ifc_export_warn_bytes: int = 100 * 1024 * 1024   # 100 MiB — log warning
+    ifc_export_max_bytes: int = 1024 * 1024 * 1024   # 1 GiB — hard reject
 
     @model_validator(mode="after")
     def _load_tcp_token(self) -> "Settings":
@@ -33,7 +37,7 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_tcp_port(cls, v: int) -> int:
         if not (1024 <= v <= 65535):
-            raise ValueError(f"tcp_port must be 1024–65535, got {v}")
+            raise ValueError(f"tcp_port must be 1024-65535, got {v}")
         return v
 
     @field_validator("allplan_workspace_root")

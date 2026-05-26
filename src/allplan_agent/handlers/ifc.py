@@ -4,9 +4,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from allplan_mcp_server.models.ifc import IfcExportSpec, IfcImportSpec
+from allplan_mcp_server.models.ifc import (
+    IFC_HARD_LIMIT_BYTES,
+    IFC_WARN_BYTES,
+    IfcExportSpec,
+    IfcImportSpec,
+)
 from allplan_mcp_server.models.references import ElementRef
-from allplan_mcp_server.security import PathNotAllowedError, validate_path
+from allplan_mcp_server.security import PathNotAllowedError, check_ifc_export_size, validate_path
 
 from ..dispatcher import command
 from ..errors import AllplanApiError
@@ -51,6 +56,12 @@ def handle_export_ifc(args: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         raise AllplanApiError(f"export_ifc failed: {exc}", exc) from exc
 
+    try:
+        oversized = check_ifc_export_size(safe_path, IFC_WARN_BYTES, IFC_HARD_LIMIT_BYTES)
+    except ValueError as exc:
+        raise AllplanApiError(str(exc), exc) from exc
+    if oversized:
+        _log.warning("ifc.export.large path=%s", safe_path.name)
     _log.info("ifc.export path=%s schema=%s", safe_path.name, spec.schema_version)
     return {"exported": bool(ok), "path": str(safe_path)}
 
