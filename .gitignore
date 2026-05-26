@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+build/
+*.egg
+.eggs/
+htmlcov/
+.coverage
+coverage.xml
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Allplan working files
+*.ndw
+*.nds
+*.prj
+.allplan_cache/
+
+# Environment
+.env
+.env.local
+*.token
+
+# OS
+.DS_Store
+Thumbs.db
