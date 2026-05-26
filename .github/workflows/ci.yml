@@ -23,6 +23,18 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run mypy src
 
+  thread-safety:
+    name: Threading law enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Listener must not import _allplan shim
+        run: |
+          ! grep -rn "^\s*from.*_allplan import\|^\s*import.*_allplan" \
+            src/allplan_agent/listener.py \
+            src/allplan_agent/command_queue.py \
+            2>/dev/null
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -31,4 +43,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --extra dev
-      - run: uv run pytest tests/unit --cov=src --cov-report=term-missing --cov-fail-under=0
+      - run: uv run pytest tests/unit tests/integration --cov=src --cov-report=term-missing --cov-fail-under=0

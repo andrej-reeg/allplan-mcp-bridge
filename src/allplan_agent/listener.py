@@ -10,10 +10,11 @@ import json
 import logging
 import socket
 import struct
+import sys
 import threading
 import time
 from concurrent.futures import Future
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .command_queue import Command, CommandQueue, QueueFullError
 
@@ -24,12 +25,48 @@ _MAX_FRAME = 16 * 1024 * 1024
 _HEARTBEAT_INTERVAL = 5.0  # seconds
 
 
-def _send_frame(sock: socket.socket, obj: dict[str, Any]) -> None:
+@runtime_checkable
+class _SocketLike(Protocol):
+    def recv(self, n: int) -> bytes: ...
+    def sendall(self, data: bytes) -> None: ...
+    def close(self) -> None: ...
+
+
+class _NamedPipeSocket:
+    """Wraps a Windows named pipe handle to implement the _SocketLike protocol."""
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+
+    def recv(self, n: int) -> bytes:
+        import win32file  # type: ignore[import-untyped]
+        hr, data = win32file.ReadFile(self._handle, n)
+        if hr != 0:
+            raise OSError(f"ReadFile failed with code {hr}")
+        return bytes(data)
+
+    def sendall(self, data: bytes) -> None:
+        import win32file
+        hr, _written = win32file.WriteFile(self._handle, data)
+        if hr != 0:
+            raise OSError(f"WriteFile failed with code {hr}")
+
+    def close(self) -> None:
+        try:
+            import win32file
+            import win32pipe  # type: ignore[import-untyped]
+            win32pipe.DisconnectNamedPipe(self._handle)
+            win32file.CloseHandle(self._handle)
+        except Exception:
+            pass
+
+
+def _send_frame(sock: _SocketLike, obj: dict[str, Any]) -> None:
     payload = json.dumps(obj, separators=(",", ":")).encode()
     sock.sendall(_HEADER.pack(len(payload)) + payload)
 
 
-def _recv_frame(sock: socket.socket) -> dict[str, Any] | None:
+def _recv_frame(sock: _SocketLike) -> dict[str, Any] | None:
     """Read one length-prefixed frame. Returns None on EOF."""
     try:
         header = _recv_exactly(sock, _HEADER.size)
@@ -50,7 +87,7 @@ def _recv_frame(sock: socket.socket) -> dict[str, Any] | None:
         return None
 
 
-def _recv_exactly(sock: socket.socket, n: int) -> bytes | None:
+def _recv_exactly(sock: _SocketLike, n: int) -> bytes | None:
     buf = bytearray()
     remaining = n
     while remaining > 0:
@@ -66,7 +103,7 @@ def _recv_exactly(sock: socket.socket, n: int) -> bytes | None:
 
 
 def _handle_connection(
-    conn: socket.socket,
+    conn: "_SocketLike",
     q: CommandQueue,
     request_timeout: float,
 ) -> None:
@@ -204,3 +241,102 @@ class TcpListenerThread(threading.Thread):
             import contextlib
             with contextlib.suppress(OSError):
                 self._server.close()
+
+
+class NamedPipeListenerThread(threading.Thread):
+    """Listens on a Windows named pipe, spawns a handler per connection."""
+
+    def __init__(
+        self,
+        q: CommandQueue,
+        pipe_name: str,
+        request_timeout: float = 10.0,
+    ) -> None:
+        super().__init__(daemon=True, name="allplan-pipe-listener")
+        self._q = q
+        self._pipe_name = pipe_name
+        self._request_timeout = request_timeout
+        self._stop_event = threading.Event()
+
+    def run(self) -> None:
+        if sys.platform != "win32":
+            _log.error("pipe.listener_platform_unsupported platform=%s", sys.platform)
+            return
+
+        try:
+            import win32file
+            import win32pipe
+            import win32security  # type: ignore[import-untyped]
+        except ImportError:
+            _log.error("pipe.listener_import_failed pywin32 not installed")
+            return
+
+        try:
+            import win32api  # type: ignore[import-untyped]
+
+            token = win32security.OpenProcessToken(
+                win32security.GetCurrentProcess(),
+                win32security.TOKEN_QUERY,
+            )
+            current_user_sid, _ = win32security.GetTokenInformation(
+                token, win32security.TokenUser
+            )
+            dacl = win32security.ACL()
+            dacl.AddAccessAllowedAce(
+                win32security.ACL_REVISION,
+                0x001F0000 | 0x00120089,
+                current_user_sid,
+            )
+            sd = win32security.SECURITY_DESCRIPTOR()
+            sd.SetSecurityDescriptorDacl(True, dacl, False)
+            sa = win32security.SECURITY_ATTRIBUTES()
+            sa.SECURITY_DESCRIPTOR = sd
+        except Exception:
+            _log.exception("pipe.listener_dacl_failed")
+            return
+
+        _log.info("pipe.listener_started name=%s", self._pipe_name)
+
+        while not self._stop_event.is_set():
+            try:
+                pipe_handle = win32pipe.CreateNamedPipe(
+                    self._pipe_name,
+                    win32pipe.PIPE_ACCESS_DUPLEX,
+                    win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT,
+                    1,
+                    65536,
+                    65536,
+                    0,
+                    sa,
+                )
+            except Exception:
+                _log.exception("pipe.create_failed name=%s", self._pipe_name)
+                time.sleep(1.0)
+                continue
+
+            try:
+                win32pipe.ConnectNamedPipe(pipe_handle, None)
+            except Exception:
+                if win32api.GetLastError() != 535:  # ERROR_PIPE_CONNECTED
+                    import contextlib
+                    with contextlib.suppress(Exception):
+                        win32file.CloseHandle(pipe_handle)
+                    continue
+
+            if self._stop_event.is_set():
+                import contextlib
+                with contextlib.suppress(Exception):
+                    win32file.CloseHandle(pipe_handle)
+                break
+
+            pipe_sock = _NamedPipeSocket(pipe_handle)
+            t = threading.Thread(
+                target=_handle_connection,
+                args=(pipe_sock, self._q, self._request_timeout),
+                daemon=True,
+            )
+            t.start()
+            _log.info("pipe.client_connected name=%s", self._pipe_name)
+
+    def stop(self) -> None:
+        self._stop_event.set()
