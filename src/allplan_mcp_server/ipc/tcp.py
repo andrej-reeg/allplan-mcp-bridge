@@ -8,6 +8,18 @@ import anyio.abc
 from .transport import AuthError, TransportClosedError, TransportError, _receive_exactly
 
 
+class _RawStreamAdapter:
+    """Wrap a raw anyio ByteStream to expose receive_exactly (needed by decode_stream)."""
+
+    __slots__ = ("_stream",)
+
+    def __init__(self, stream: anyio.abc.ByteStream) -> None:
+        self._stream = stream
+
+    async def receive_exactly(self, n: int) -> bytes:
+        return await _receive_exactly(self._stream, n)
+
+
 class TcpTransport:
     """Client-side loopback TCP transport with token auth.
 
@@ -34,8 +46,9 @@ class TcpTransport:
         from .framing import decode_stream, encode
 
         stream = await anyio.connect_tcp(self._host, self._port)
-        # Expect the hello frame from the agent before anything else
-        frames = decode_stream(stream)
+        # Expect the hello frame from the agent before anything else.
+        # Use an adapter because the raw anyio stream lacks receive_exactly.
+        frames = decode_stream(_RawStreamAdapter(stream))
         try:
             hello = await frames.__anext__()
         except StopAsyncIteration:

@@ -50,6 +50,7 @@ class IpcClient:
         self._running = False
         self._last_heartbeat_at: float = time.monotonic()
         self._reconnect_count = 0
+        self._send_lock = asyncio.Lock()  # serialise concurrent sends on one stream
 
     @property
     def is_connected(self) -> bool:
@@ -92,7 +93,8 @@ class IpcClient:
 
         try:
             assert self._transport is not None
-            await self._transport.send(frame)
+            async with self._send_lock:
+                await self._transport.send(frame)
         except Exception as exc:
             self._pending.pop(req_id, None)
             raise IpcError("AgentDisconnected", f"Send failed: {exc}") from exc
