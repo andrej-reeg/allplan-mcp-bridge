@@ -6,6 +6,7 @@ THREADING CONTRACT:
   - All Allplan API calls happen in pump_once() on the main thread.
 """
 
+import contextlib
 import json
 import logging
 import socket
@@ -255,11 +256,8 @@ class TcpListenerThread(threading.Thread):
         try:
             _serve_tcp_conn(conn, self._q, self._request_timeout, self._token)
         finally:
-            with self._conns_lock:
-                try:
-                    self._active_conns.remove(conn)
-                except ValueError:
-                    pass
+            with self._conns_lock, contextlib.suppress(ValueError):
+                self._active_conns.remove(conn)
 
     def run(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

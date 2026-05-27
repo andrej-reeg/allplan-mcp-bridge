@@ -63,9 +63,9 @@ try:
     _USING_FAKE = False
 except ImportError:
     # Only reached outside Allplan's embedded Python (e.g. unit tests on Linux/CI).
-    from tests.fakes import fake_allplan_api as AllplanElements  # type: ignore[import-not-found]
-    from tests.fakes import fake_allplan_api as AllplanGeo  # type: ignore[import-not-found]
-    from tests.fakes import fake_allplan_api as AllplanSettings  # type: ignore[import-not-found]
+    from tests.fakes import fake_allplan_api as AllplanElements
+    from tests.fakes import fake_allplan_api as AllplanGeo
+    from tests.fakes import fake_allplan_api as AllplanSettings
 
     _USING_FAKE = True
     _log.warning(
@@ -78,19 +78,19 @@ except ImportError:
 try:
     import NemAll_Python_BaseElements as BaseElements  # type: ignore[import-not-found]
 except ImportError:
-    BaseElements = None  # type: ignore[assignment]
+    BaseElements = None
     _log.warning("NemAll_Python_BaseElements not available — CommonProperties disabled")
 
 try:
     import NemAll_Python_ArchElements as ArchElements  # type: ignore[import-not-found]
 except ImportError:
-    ArchElements = None  # type: ignore[assignment]
+    ArchElements = None
     _log.warning("NemAll_Python_ArchElements not available — real geometry API disabled")
 
 try:
     import NemAll_Python_IFW_ElementAdapter as IFW  # type: ignore[import-not-found]
 except ImportError:
-    IFW = None  # type: ignore[assignment]
+    IFW = None
     _log.warning("NemAll_Python_IFW_ElementAdapter not available — real geometry API disabled")
 
 __all__ = [

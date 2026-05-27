@@ -63,14 +63,16 @@ def _setup_file_logging() -> None:
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root = logging.getLogger()
-    if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == str(log_file) for h in root.handlers):
+    already = any(
+        isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == str(log_file)
+        for h in root.handlers
+    )
+    if not already:
         root.addHandler(handler)
     root.setLevel(logging.DEBUG)
 
-try:
+with contextlib.suppress(Exception):
     _setup_file_logging()
-except Exception:
-    pass
 _dlog("AllplanMcpBridge module loaded")
 
 _DRAIN_INTERVAL_MS = 100
@@ -120,7 +122,11 @@ def _start_timer(queue: CommandQueue) -> Any:
             t = m.QTimer()
             t.timeout.connect(lambda: pump_once(queue))
             t.start(_DRAIN_INTERVAL_MS)
-            _log.info("bridge.timer type=QTimer module=%s interval_ms=%d", qt_mod, _DRAIN_INTERVAL_MS)
+            _log.info(
+                "bridge.timer type=QTimer module=%s interval_ms=%d",
+                qt_mod,
+                _DRAIN_INTERVAL_MS,
+            )
             _dlog(f"bridge.timer started module={qt_mod} interval_ms={_DRAIN_INTERVAL_MS}")
             return t
         except Exception as exc:
@@ -188,7 +194,7 @@ def start_bridge() -> None:
 
     _pywin32_ok = False
     try:
-        import win32pipe  # type: ignore[import-not-found]  # noqa: F401
+        import win32pipe  # type: ignore[import-untyped]  # noqa: F401
         _pywin32_ok = True
     except ImportError:
         pass
@@ -239,11 +245,17 @@ def start_bridge() -> None:
         _queue.notify_fn = _qt_notify
         _dlog("bridge.notify_fn set via QTimer.singleShot")
     else:
-        _dlog(f"bridge.notify_fn NOT set (Qt={'None' if _qt is None else 'ok'} queue={'None' if _queue is None else 'ok'})")
+        qt_state = "None" if _qt is None else "ok"
+        q_state = "None" if _queue is None else "ok"
+        _dlog(f"bridge.notify_fn NOT set (Qt={qt_state} queue={q_state})")
 
     _started = True
     _log.info("bridge.started transport=%s", _transport_addr)
-    _dlog(f"bridge.started transport={_transport_addr} timer={_timer is not None} notify_fn={_queue.notify_fn is not None if _queue else False}")
+    _notify_set = _queue.notify_fn is not None if _queue else False
+    _dlog(
+        f"bridge.started transport={_transport_addr}"
+        f" timer={_timer is not None} notify_fn={_notify_set}"
+    )
 
     # Background polling thread: calls pump_once every 200 ms on a daemon thread.
     # Guarantees commands are processed even when QTimer and mouse events are absent.
@@ -394,7 +406,10 @@ class McpBridgeInteractor:
         """
         try:
             from allplan_agent.handlers._allplan import (  # noqa: PLC0415
-                AllplanGeo, BaseElements, flush_pending_specs, get_coord_input,
+                AllplanGeo,
+                BaseElements,
+                flush_pending_specs,
+                get_coord_input,
             )
             specs = flush_pending_specs()
             if not specs:
@@ -415,7 +430,9 @@ class McpBridgeInteractor:
                 try:
                     _dlog(f"_insert_pending: building kind={kind}")
                     if kind == "wall":
-                        from allplan_agent.handlers.geometry import build_wall_element  # noqa: PLC0415
+                        from allplan_agent.handlers.geometry import (
+                            build_wall_element,  # noqa: PLC0415
+                        )
                         elem = build_wall_element(spec)
                         model_ele_list.append(elem)
                         _dlog("_insert_pending: wall element built OK")

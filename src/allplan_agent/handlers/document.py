@@ -1,5 +1,6 @@
 """Document handlers: info, save, undo, redo; also ping."""
 
+import contextlib
 import logging
 import time
 from typing import Any
@@ -35,10 +36,8 @@ def handle_get_active_document_info(args: dict[str, Any]) -> dict[str, Any]:
     for attr in ("GetActiveDrawingFileNumber", "GetActiveLayoutNumber"):
         fn = getattr(AllplanElements, attr, None)
         if fn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 info[attr] = fn()
-            except Exception:
-                pass
     return info
 
 

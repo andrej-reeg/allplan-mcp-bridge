@@ -1,8 +1,6 @@
 """Tests for per-tool call metrics."""
 
-import math
 
-import pytest
 
 from allplan_mcp_server.metrics import Metrics
 

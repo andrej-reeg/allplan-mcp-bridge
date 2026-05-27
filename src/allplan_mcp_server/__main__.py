@@ -42,7 +42,7 @@ def _make_client(settings: Settings) -> IpcClient:
 
 
 async def _amain() -> None:
-    settings = Settings()  # type: ignore[call-arg]  # allplan_workspace_root comes from env
+    settings = Settings()
     configure_logging(
         log_level=settings.log_level,
         workspace_root=settings.allplan_workspace_root,
@@ -56,7 +56,11 @@ async def _amain() -> None:
         # Graceful shutdown: let in-flight calls complete before closing IPC.
         pending = len(client._pending)
         if pending:
-            log.info("server.shutdown_drain", pending_calls=pending, timeout_s=_SHUTDOWN_DRAIN_TIMEOUT)
+            log.info(
+                "server.shutdown_drain",
+                pending_calls=pending,
+                timeout_s=_SHUTDOWN_DRAIN_TIMEOUT,
+            )
             await client.drain(timeout=_SHUTDOWN_DRAIN_TIMEOUT)
         log.info("server.shutdown_start")
         await client.stop()

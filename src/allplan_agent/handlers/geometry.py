@@ -17,11 +17,12 @@ from allplan_mcp_server.models.references import ElementRef
 from ..dispatcher import command
 from ..errors import AllplanApiError
 from ._allplan import (
+    _USING_FAKE,
+    IFW,
     AllplanElements,
     AllplanGeo,
     ArchElements,
     BaseElements,
-    _USING_FAKE,
     queue_spec,
 )
 
@@ -94,9 +95,9 @@ def _insert_elements(coord_input: Any, model_ele_list: list[Any]) -> None:
                 failures.append(f"coord_input.CreateElements: {exc}")
                 _log.warning("_insert_elements: coord_input.CreateElements failed: %s", exc)
 
+    tried = "; ".join(failures) or "no methods found"
     raise AllplanApiError(
-        "Cannot insert elements — tried: %s. coord_input present: %s"
-        % ("; ".join(failures) or "no methods found", coord_input is not None)
+        f"Cannot insert elements — tried: {tried}. coord_input present: {coord_input is not None}"
     )
 
 
@@ -112,7 +113,7 @@ def _element_uuid(elem: Any) -> str:
         for method in ("ToGuidString", "ToString"):
             fn = getattr(uuid_obj, method, None)
             if fn:
-                return fn()
+                return str(fn())
         return str(uuid_obj)
     except Exception as exc:
         _log.debug("_element_uuid failed: %s", exc)
@@ -148,7 +149,9 @@ def _build_wall_properties(height_mm: float, thickness_mm: float) -> Any:
                 _log.debug("_build_wall_properties: %s(0) failed: %s", method, exc)
 
     if tier_props is None:
-        _log.warning("_build_wall_properties: could not retrieve default tier; thickness uses wall default")
+        _log.warning(
+            "_build_wall_properties: could not retrieve default tier; thickness uses wall default"
+        )
         return wall_props
 
     for attr in ("Thickness", "WallThickness"):

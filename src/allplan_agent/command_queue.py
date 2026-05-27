@@ -1,11 +1,14 @@
 """Thread-safe command queue for the main-thread drain loop."""
 
+import contextlib
 import queue
 import time
-from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class QueueFullError(Exception):
@@ -44,10 +47,8 @@ class CommandQueue:
                 f"Command queue full (maxsize={self._q.maxsize})"
             ) from exc
         if self.notify_fn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.notify_fn()
-            except Exception:
-                pass
 
     def drain(self, max_items: int = 8) -> list[Command]:
         """Remove up to max_items commands without blocking. Called from main thread."""
