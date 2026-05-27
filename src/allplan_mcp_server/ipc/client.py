@@ -77,6 +77,8 @@ class IpcClient:
     async def start(self) -> None:
         self._running = True
         await self._connect_once()
+        if not self.is_connected and self._running:
+            asyncio.get_running_loop().create_task(self._reconnect_loop())
 
     async def stop(self) -> None:
         self._running = False
@@ -160,8 +162,7 @@ class IpcClient:
             await transport.connect()
         except TransportError as exc:
             log.warning("ipc.connect_failed", error=str(exc))
-            asyncio.get_running_loop().create_task(self._reconnect_loop())
-            return
+            return  # caller (_reconnect_loop or start) handles retry scheduling
         self._transport = transport
         self._last_heartbeat_at = time.monotonic()
         self._reader_task = asyncio.get_running_loop().create_task(self._reader_loop())

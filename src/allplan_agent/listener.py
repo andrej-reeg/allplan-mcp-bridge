@@ -185,8 +185,29 @@ def _handle_connection(
         conn.close()
 
 
+def _serve_tcp_conn(
+    conn: socket.socket,
+    q: CommandQueue,
+    request_timeout: float,
+    token: str,
+) -> None:
+    """Send hello frame then serve one TCP connection."""
+    try:
+        _send_frame(conn, {"hello": token})
+    except OSError as exc:
+        _log.warning("listener.hello_failed error=%s", exc)
+        conn.close()
+        return
+    _handle_connection(conn, q, request_timeout)
+
+
 class TcpListenerThread(threading.Thread):
-    """Listens on a loopback TCP port, spawns a handler per connection."""
+    """Listens on a TCP port, spawns a handler per connection.
+
+    On Windows the bridge typically uses NamedPipeListenerThread; this thread
+    is used on non-Windows platforms and when force_tcp=True is set in config
+    to allow cross-network clients (e.g. WSL2 → Windows).
+    """
 
     def __init__(
         self,
@@ -194,19 +215,34 @@ class TcpListenerThread(threading.Thread):
         host: str = "127.0.0.1",
         port: int = 0,
         request_timeout: float = 10.0,
+        token: str = "",
     ) -> None:
         super().__init__(daemon=True, name="allplan-ipc-listener")
         self._q = q
         self._host = host
         self._port = port
         self._request_timeout = request_timeout
+        self._token = token
         self._server: socket.socket | None = None
         self._actual_port: int = 0
         self._stop_event = threading.Event()
+        self._active_conns: list[socket.socket] = []
+        self._conns_lock = threading.Lock()
 
     @property
     def actual_port(self) -> int:
         return self._actual_port
+
+    def _serve_and_track(self, conn: socket.socket) -> None:
+        """Serve one connection, removing it from tracking when done."""
+        try:
+            _serve_tcp_conn(conn, self._q, self._request_timeout, self._token)
+        finally:
+            with self._conns_lock:
+                try:
+                    self._active_conns.remove(conn)
+                except ValueError:
+                    pass
 
     def run(self) -> None:
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -226,9 +262,11 @@ class TcpListenerThread(threading.Thread):
             except OSError:
                 break
             _log.info("listener.connection addr=%s", addr)
+            with self._conns_lock:
+                self._active_conns.append(conn)
             t = threading.Thread(
-                target=_handle_connection,
-                args=(conn, self._q, self._request_timeout),
+                target=self._serve_and_track,
+                args=(conn,),
                 daemon=True,
             )
             t.start()
@@ -241,6 +279,14 @@ class TcpListenerThread(threading.Thread):
             import contextlib
             with contextlib.suppress(OSError):
                 self._server.close()
+        # Close active client connections so MCP server detects disconnect
+        # and reconnects to the new bridge instance.
+        with self._conns_lock:
+            for conn in list(self._active_conns):
+                import contextlib
+                with contextlib.suppress(OSError):
+                    conn.close()
+            self._active_conns.clear()
 
 
 class NamedPipeListenerThread(threading.Thread):

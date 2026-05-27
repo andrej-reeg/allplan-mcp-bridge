@@ -21,18 +21,16 @@ class _RawStreamAdapter:
 
 
 class TcpTransport:
-    """Client-side loopback TCP transport with token auth.
+    """Client-side TCP transport with token auth.
 
     The server (agent side) sends ``{"hello": "<token>"}`` as the first frame
     upon accepting a connection. This client verifies that token before any
     real messages are exchanged.
 
-    Never binds or connects to anything other than 127.0.0.1.
+    For cross-network access (e.g. WSL2 → Windows) set host to the remote IP.
     """
 
     def __init__(self, host: str, port: int, token: str) -> None:
-        if host != "127.0.0.1":
-            raise ValueError(f"TcpTransport only allows 127.0.0.1, got {host!r}")
         self._host = host
         self._port = port
         self._token = token
@@ -42,15 +40,28 @@ class TcpTransport:
     def is_connected(self) -> bool:
         return self._stream is not None
 
+    _CONNECT_TIMEOUT = 5.0  # seconds to wait for hello frame
+
     async def connect(self) -> None:
         from .framing import decode_stream, encode
 
-        stream = await anyio.connect_tcp(self._host, self._port)
+        try:
+            stream = await anyio.connect_tcp(self._host, self._port)
+        except OSError as exc:
+            raise TransportError(f"TCP connect failed: {exc}") from exc
+
         # Expect the hello frame from the agent before anything else.
         # Use an adapter because the raw anyio stream lacks receive_exactly.
         frames = decode_stream(_RawStreamAdapter(stream))
         try:
-            hello = await frames.__anext__()
+            with anyio.fail_after(self._CONNECT_TIMEOUT):
+                hello = await frames.__anext__()
+        except TimeoutError:
+            await stream.aclose()
+            raise TransportError(
+                f"Agent did not send hello frame within {self._CONNECT_TIMEOUT}s "
+                f"— bridge may not be running"
+            ) from None
         except StopAsyncIteration:
             await stream.aclose()
             raise TransportError("Agent closed connection before sending hello frame") from None

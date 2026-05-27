@@ -41,8 +41,15 @@ def undo_bracket(name: str) -> Generator[None, None, None]:
     On exception: rolls back and re-raises.
 
     Uses the real Allplan undo API when available; no-ops gracefully when
-    running outside Allplan (e.g. in tests with the fake API).
+    running outside Allplan (e.g. in tests with the fake API) or when called
+    from a background thread (BeginUndoBracket blocks if not on main thread).
     """
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
     try:
         from allplan_agent.handlers._allplan import AllplanElements
         begin = getattr(AllplanElements, "BeginUndoBracket", None)

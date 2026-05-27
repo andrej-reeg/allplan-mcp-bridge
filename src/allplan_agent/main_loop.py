@@ -8,6 +8,7 @@ import logging
 import time
 from typing import Any
 
+from . import handlers as _handlers  # noqa: F401 — registers all @command decorators
 from .command_queue import Command, CommandQueue
 from .dispatcher import dispatch
 from .safety import undo_bracket
@@ -34,6 +35,8 @@ def pump_once(q: CommandQueue, max_items: int = 8) -> int:
     - No asyncio, no threads spawned here.
     """
     commands = q.drain(max_items)
+    if commands:
+        _log.debug("pump_once.drain count=%d", len(commands))
     now = time.monotonic()
 
     for cmd in commands:

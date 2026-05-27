@@ -433,18 +433,20 @@ async def test_ipc_client_accepts_normal_args() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_tcp_transport_rejects_non_loopback() -> None:
+def test_tcp_transport_allows_non_loopback() -> None:
+    # WSL2 ↔ Windows requires cross-network TCP (e.g. 10.255.255.254).
+    # TcpTransport no longer restricts to loopback; token auth is the security layer.
     from allplan_mcp_server.ipc.tcp import TcpTransport
 
-    with pytest.raises(ValueError, match="127.0.0.1"):
-        TcpTransport(host="0.0.0.0", port=9999, token="tok")
+    t = TcpTransport(host="10.255.255.254", port=9999, token="tok")
+    assert t._host == "10.255.255.254"
 
 
-def test_tcp_transport_rejects_public_ip() -> None:
+def test_tcp_transport_allows_loopback() -> None:
     from allplan_mcp_server.ipc.tcp import TcpTransport
 
-    with pytest.raises(ValueError, match="127.0.0.1"):
-        TcpTransport(host="192.168.1.1", port=9999, token="tok")
+    t = TcpTransport(host="127.0.0.1", port=9999, token="tok")
+    assert t._host == "127.0.0.1"
 
 
 # ---------------------------------------------------------------------------

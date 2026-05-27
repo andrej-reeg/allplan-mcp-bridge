@@ -24,7 +24,7 @@ def _redact_value(value: str, root: Path | None) -> str:
 
 def _make_path_redactor(workspace_root: Path | None, log_level: str) -> Processor:
     def _redact(
-        logger: Any, method: str, event_dict: EventDict
+        _logger: Any, _method: str, event_dict: EventDict
     ) -> MutableMapping[str, Any]:
         if log_level == "DEBUG":
             return event_dict

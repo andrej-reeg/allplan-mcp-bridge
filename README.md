@@ -1,4 +1,4 @@
-![CI](https://github.com/OWNER/allplan-mcp-bridge/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/andrej-reeg/allplan-mcp-bridge/actions/workflows/ci.yml/badge.svg)
 
 # allplan-mcp-bridge
 

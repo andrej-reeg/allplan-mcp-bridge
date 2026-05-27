@@ -1,8 +1,5 @@
 """Entry point: initialise IPC client, register tools, run FastMCP over stdio."""
 
-import secrets
-import stat
-
 import anyio
 
 from . import server
@@ -14,24 +11,13 @@ from .logging import configure_logging
 from .server import mcp
 
 
-def _rotate_tcp_token(settings: Settings) -> str:
-    """Generate a new random TCP auth token, write to token file with 0600 perms.
-
-    Returns the new token string.
-    """
-    token_file = settings.tcp_token_file.expanduser()
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(32)
-    token_file.write_text(token)
-    token_file.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
-    return token
-
-
 def _make_client(settings: Settings) -> IpcClient:
     if settings.ipc_transport == "tcp":
-        token = _rotate_tcp_token(settings)
+        # Read token fresh on each connection — bridge regenerates on every restart.
+        token_file = settings.tcp_token_file.expanduser()
 
         def _tcp_factory() -> TcpTransport:
+            token = token_file.read_text(encoding="utf-8").strip() if token_file.exists() else ""
             return TcpTransport(
                 host=settings.tcp_host,
                 port=settings.tcp_port,
@@ -42,7 +28,7 @@ def _make_client(settings: Settings) -> IpcClient:
 
     from .ipc.named_pipe import NamedPipeTransport
 
-    pipe_name = settings.pipe_name.format(session_id="default")
+    pipe_name = settings.pipe_name
 
     def _pipe_factory() -> NamedPipeTransport:
         return NamedPipeTransport(pipe_name=pipe_name)

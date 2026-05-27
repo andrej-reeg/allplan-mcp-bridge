@@ -1,7 +1,8 @@
 """Geometry models. All lengths are in millimetres unless stated otherwise."""
 
+import json
 import math
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -26,6 +27,16 @@ class Point3D(BaseModel):
     y: _Coord
     z: _Coord
 
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_string(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Point3D string is not valid JSON: {exc}") from exc
+        return v
+
     @model_validator(mode="after")
     def _finite_coords(self) -> "Point3D":
         _finite(self.x)
@@ -47,6 +58,16 @@ class Vector3D(BaseModel):
     x: _Coord
     y: _Coord
     z: _Coord
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_string(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Vector3D string is not valid JSON: {exc}") from exc
+        return v
 
     @model_validator(mode="after")
     def _finite_coords(self) -> "Vector3D":

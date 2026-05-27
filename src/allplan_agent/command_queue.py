@@ -2,6 +2,7 @@
 
 import queue
 import time
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,10 @@ class CommandQueue:
 
     def __init__(self, maxsize: int = 256) -> None:
         self._q: queue.Queue[Command] = queue.Queue(maxsize=maxsize)
+        # Called on the listener thread after each successful enqueue.
+        # Set by AllplanMcpBridge to QTimer.singleShot(0, pump_once) so the
+        # main thread wakes immediately without waiting for a mouse event.
+        self.notify_fn: Callable[[], None] | None = None
 
     def enqueue(self, cmd: Command) -> None:
         """Add a command. Raises QueueFullError if at capacity."""
@@ -38,6 +43,11 @@ class CommandQueue:
             raise QueueFullError(
                 f"Command queue full (maxsize={self._q.maxsize})"
             ) from exc
+        if self.notify_fn is not None:
+            try:
+                self.notify_fn()
+            except Exception:
+                pass
 
     def drain(self, max_items: int = 8) -> list[Command]:
         """Remove up to max_items commands without blocking. Called from main thread."""

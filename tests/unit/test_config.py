@@ -4,14 +4,14 @@ from pydantic import ValidationError
 from allplan_mcp_server.config import Settings
 
 
-def test_settings_raises_without_workspace() -> None:
-    with pytest.raises((ValidationError, Exception)):
-        Settings()
+def test_settings_workspace_auto_detected() -> None:
+    s = Settings()
+    assert s.allplan_workspace_root is not None
 
 
 def test_settings_with_workspace(tmp_path: pytest.TempPathFactory) -> None:
     s = Settings(allplan_workspace_root=tmp_path)  # type: ignore[arg-type]
-    assert s.ipc_transport == "named_pipe"
+    assert s.ipc_transport == "tcp"
     assert s.request_timeout_seconds == 10.0
     assert s.log_level == "INFO"
 

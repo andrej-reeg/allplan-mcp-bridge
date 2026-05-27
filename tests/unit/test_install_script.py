@@ -1,7 +1,7 @@
 """Tests for scripts/install_pythonpart.py — idempotency and copy logic.
 
 These run on any platform (no Allplan, no Windows required). The install
-function accepts a --target-dir argument so we can point it at tmp_path.
+function accepts scripts_dir/library_dir so we can point it at tmp_path.
 """
 
 from __future__ import annotations
@@ -29,27 +29,39 @@ def install_mod() -> object:
     return _load_install_module()
 
 
+@pytest.fixture()
+def dirs(tmp_path: Path) -> tuple[Path, Path]:
+    """Return (scripts_dir, library_dir) under tmp_path."""
+    return tmp_path / "scripts", tmp_path / "library"
+
+
+def _install(mod: object, scripts_dir: Path, library_dir: Path, **kwargs: object) -> None:
+    mod.install(  # type: ignore[union-attr]
+        scripts_dir=scripts_dir,
+        library_dir=library_dir,
+        pipe_name=kwargs.get("pipe_name", r"\\.\pipe\test-bridge"),
+        tcp_port=int(kwargs.get("tcp_port", 49153)),
+    )
+
+
 # ---------------------------------------------------------------------------
 # install() happy path
 # ---------------------------------------------------------------------------
 
 
-def test_install_creates_agent_directory(install_mod: object, tmp_path: Path) -> None:
-    install_mod.install(  # type: ignore[union-attr]
-        target_dir=tmp_path,
-        pipe_name=r"\\.\pipe\test-bridge",
-        tcp_port=49153,
-    )
-    assert (tmp_path / "allplan_agent").is_dir()
+def test_install_creates_agent_directory(install_mod: object, dirs: tuple[Path, Path]) -> None:
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
+    assert (scripts_dir / "allplan_agent").is_dir()
 
 
-def test_install_creates_bridge_config(install_mod: object, tmp_path: Path) -> None:
-    install_mod.install(  # type: ignore[union-attr]
-        target_dir=tmp_path,
-        pipe_name=r"\\.\pipe\test-bridge",
-        tcp_port=49153,
+def test_install_creates_bridge_config(install_mod: object, dirs: tuple[Path, Path]) -> None:
+    scripts_dir, library_dir = dirs
+    _install(
+        install_mod, scripts_dir, library_dir,
+        pipe_name=r"\\.\pipe\test-bridge", tcp_port=49153,
     )
-    config_path = tmp_path / "allplan_agent" / "bridge_config.json"
+    config_path = scripts_dir / "allplan_agent" / "bridge_config.json"
     assert config_path.exists()
     config = json.loads(config_path.read_text())
     assert config["pipe_name"] == r"\\.\pipe\test-bridge"
@@ -57,40 +69,39 @@ def test_install_creates_bridge_config(install_mod: object, tmp_path: Path) -> N
     assert config["tcp_host"] == "127.0.0.1"
 
 
-def test_install_copies_pythonpart_entry(install_mod: object, tmp_path: Path) -> None:
-    install_mod.install(  # type: ignore[union-attr]
-        target_dir=tmp_path,
-        pipe_name=r"\\.\pipe\test",
-        tcp_port=49152,
-    )
-    assert (tmp_path / "allplan_agent" / "pythonpart_entry.py").exists()
+def test_install_copies_allplan_mcp_bridge_entry(
+    install_mod: object, dirs: tuple[Path, Path]
+) -> None:
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
+    assert (scripts_dir / "allplan_agent" / "AllplanMcpBridge.py").exists()
 
 
-def test_install_creates_pyp_file(install_mod: object, tmp_path: Path) -> None:
-    install_mod.install(  # type: ignore[union-attr]
-        target_dir=tmp_path,
-        pipe_name=r"\\.\pipe\test",
-        tcp_port=49152,
-    )
-    pyp = tmp_path / "AllplanMcpBridge.pyp"
+def test_install_copies_pythonpart_entry(install_mod: object, dirs: tuple[Path, Path]) -> None:
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
+    assert (scripts_dir / "allplan_agent" / "pythonpart_entry.py").exists()
+
+
+def test_install_creates_pyp_file(install_mod: object, dirs: tuple[Path, Path]) -> None:
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
+    pyp = library_dir / "Allplan MCP Bridge" / "AllplanMcpBridge.pyp"
     assert pyp.exists()
     content = pyp.read_text(encoding="utf-8")
     assert "Allplan MCP Bridge" in content
-    assert "allplan_agent.pythonpart_entry" in content
+    assert "allplan_agent" in content
+    assert "AllplanMcpBridge.py" in content
+    assert "Interactor" in content
 
 
-def test_install_vendors_models(install_mod: object, tmp_path: Path) -> None:
-    install_mod.install(  # type: ignore[union-attr]
-        target_dir=tmp_path,
-        pipe_name=r"\\.\pipe\test",
-        tcp_port=49152,
-    )
-    # Models vendored alongside agent code
-    vendor_dir = tmp_path / "allplan_mcp_server_models"
-    assert vendor_dir.is_dir()
-    # Key model files present
-    assert (vendor_dir / "geometry.py").exists()
-    assert (vendor_dir / "ifc.py").exists()
+def test_install_vendors_models(install_mod: object, dirs: tuple[Path, Path]) -> None:
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
+    models_dir = scripts_dir / "allplan_agent" / "allplan_mcp_server" / "models"
+    assert models_dir.is_dir()
+    assert (models_dir / "geometry.py").exists()
+    assert (models_dir / "ifc.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -98,59 +109,47 @@ def test_install_vendors_models(install_mod: object, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_install_idempotent_no_changes(install_mod: object, tmp_path: Path) -> None:
+def test_install_idempotent_no_changes(install_mod: object, dirs: tuple[Path, Path]) -> None:
     """Second install run with same args must not overwrite any files."""
-    mod = install_mod
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
 
-    # First run
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\test", tcp_port=49152)  # type: ignore[union-attr]
-
-    # Collect mtimes after first install
     def _mtimes() -> dict[str, float]:
         return {
-            str(p.relative_to(tmp_path)): p.stat().st_mtime
-            for p in tmp_path.rglob("*")
+            str(p.relative_to(scripts_dir.parent)): p.stat().st_mtime
+            for p in list(scripts_dir.rglob("*")) + list(library_dir.rglob("*"))
             if p.is_file() and p.suffix not in (".pyc",)
         }
 
     mtimes_before = _mtimes()
-
-    # Second run — same args
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\test", tcp_port=49152)  # type: ignore[union-attr]
+    _install(install_mod, scripts_dir, library_dir)
     mtimes_after = _mtimes()
 
-    # No file should have been updated (all hashes match → no writes)
     for path, mtime in mtimes_before.items():
-        # bridge_config.json is re-evaluated but content-equal → skipped
         assert mtimes_after.get(path) == mtime, f"File unexpectedly updated: {path}"
 
 
-def test_install_updates_changed_config(install_mod: object, tmp_path: Path) -> None:
+def test_install_updates_changed_config(install_mod: object, dirs: tuple[Path, Path]) -> None:
     """Second install with different pipe_name updates bridge_config.json."""
-    mod = install_mod
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\first", tcp_port=49152)  # type: ignore[union-attr]
-
-    # Change the pipe name
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\second", tcp_port=49152)  # type: ignore[union-attr]
-
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir, pipe_name=r"\\.\pipe\first")
+    _install(install_mod, scripts_dir, library_dir, pipe_name=r"\\.\pipe\second")
     config = json.loads(
-        (tmp_path / "allplan_agent" / "bridge_config.json").read_text()
+        (scripts_dir / "allplan_agent" / "bridge_config.json").read_text()
     )
     assert config["pipe_name"] == r"\\.\pipe\second"
 
 
-def test_install_updates_modified_source_file(install_mod: object, tmp_path: Path) -> None:
+def test_install_updates_modified_source_file(install_mod: object, dirs: tuple[Path, Path]) -> None:
     """If a source file changes, the installed copy is updated on re-install."""
-    mod = install_mod
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\test", tcp_port=49152)  # type: ignore[union-attr]
+    scripts_dir, library_dir = dirs
+    _install(install_mod, scripts_dir, library_dir)
 
-    # Corrupt one installed file
-    target_file = tmp_path / "allplan_agent" / "pythonpart_entry.py"
+    target_file = scripts_dir / "allplan_agent" / "pythonpart_entry.py"
     original = target_file.read_bytes()
     target_file.write_bytes(b"# corrupted\n")
 
-    # Re-install should restore it
-    mod.install(target_dir=tmp_path, pipe_name=r"\\.\pipe\test", tcp_port=49152)  # type: ignore[union-attr]
+    _install(install_mod, scripts_dir, library_dir)
     assert target_file.read_bytes() == original
 
 
