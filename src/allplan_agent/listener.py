@@ -113,7 +113,11 @@ def _handle_connection(
     def _heartbeat_loop() -> None:
         while True:
             try:
-                _send_frame(conn, {"event": "heartbeat", "ts": time.time()})
+                _send_frame(conn, {
+                    "event": "heartbeat",
+                    "ts": time.time(),
+                    "queue_depth": q.size,
+                })
                 time.sleep(_HEARTBEAT_INTERVAL)
             except OSError:
                 break
@@ -131,6 +135,8 @@ def _handle_connection(
             cmd_name = msg.get("cmd")
             args = msg.get("args", {})
             deadline_ms = msg.get("deadline_ms", int(request_timeout * 1000))
+            # correlation_id propagated from server; falls back to req_id
+            correlation_id = msg.get("correlation_id") or req_id
 
             if not isinstance(req_id, str) or not isinstance(cmd_name, str):
                 continue
@@ -138,6 +144,10 @@ def _handle_connection(
                 args = {}
 
             timeout_s = deadline_ms / 1000.0
+
+            _log.debug(
+                "listener.request correlation_id=%s cmd=%s", correlation_id, cmd_name
+            )
 
             fut: Future[dict[str, Any]] = Future()
             cmd = Command(
@@ -154,6 +164,7 @@ def _handle_connection(
                 _send_frame(conn, {
                     "id": req_id,
                     "ok": False,
+                    "correlation_id": correlation_id,
                     "error": {"code": "Internal", "message": "Command queue full"},
                 })
                 continue
@@ -165,18 +176,24 @@ def _handle_connection(
                 result = fut.result(timeout=timeout_s + 1.0)
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
                 _send_frame(conn, {
-                    "id": req_id, "ok": True, "result": result, "elapsed_ms": elapsed_ms,
+                    "id": req_id,
+                    "ok": True,
+                    "result": result,
+                    "elapsed_ms": elapsed_ms,
+                    "correlation_id": correlation_id,
                 })
             except TimeoutError:
                 _send_frame(conn, {
                     "id": req_id,
                     "ok": False,
+                    "correlation_id": correlation_id,
                     "error": {"code": "Timeout", "message": f"No result for {cmd_name!r}"},
                 })
             except Exception as exc:
                 _send_frame(conn, {
                     "id": req_id,
                     "ok": False,
+                    "correlation_id": correlation_id,
                     "error": {"code": "AllplanApiError", "message": str(exc)},
                 })
             finally:

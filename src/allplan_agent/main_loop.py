@@ -41,7 +41,7 @@ def pump_once(q: CommandQueue, max_items: int = 8) -> int:
 
     for cmd in commands:
         if now > cmd.deadline_at:
-            _log.warning("pump_once.deadline_exceeded cmd_id=%s cmd=%s", cmd.id, cmd.cmd_name)
+            _log.warning("pump_once.deadline_exceeded correlation_id=%s cmd=%s", cmd.id, cmd.cmd_name)
             if not cmd.future.done():
                 cmd.future.set_exception(
                     TimeoutError(f"Deadline exceeded for {cmd.cmd_name!r}")
@@ -53,14 +53,14 @@ def pump_once(q: CommandQueue, max_items: int = 8) -> int:
             result = _resolve_command(cmd)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             _log.info(
-                "pump_once.ok cmd_id=%s cmd=%s elapsed_ms=%d", cmd.id, cmd.cmd_name, elapsed_ms
+                "pump_once.ok correlation_id=%s cmd=%s elapsed_ms=%d", cmd.id, cmd.cmd_name, elapsed_ms
             )
             if not cmd.future.done():
                 cmd.future.set_result(result)
         except Exception as exc:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             _log.error(
-                "pump_once.error cmd_id=%s cmd=%s error=%s elapsed_ms=%d",
+                "pump_once.error correlation_id=%s cmd=%s error=%s elapsed_ms=%d",
                 cmd.id, cmd.cmd_name, exc, elapsed_ms,
             )
             if not cmd.future.done():

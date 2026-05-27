@@ -1,6 +1,7 @@
 """Entry point: initialise IPC client, register tools, run FastMCP over stdio."""
 
 import anyio
+import structlog
 
 from . import server
 from . import tools as _tools_pkg  # noqa: F401 — side-effect: registers all tools on mcp
@@ -9,6 +10,10 @@ from .ipc.client import IpcClient
 from .ipc.tcp import TcpTransport
 from .logging import configure_logging
 from .server import mcp
+
+log = structlog.get_logger(__name__)
+
+_SHUTDOWN_DRAIN_TIMEOUT = 5.0  # seconds to wait for in-flight calls on SIGINT
 
 
 def _make_client(settings: Settings) -> IpcClient:
@@ -48,7 +53,14 @@ async def _amain() -> None:
     try:
         await mcp.run_async()
     finally:
+        # Graceful shutdown: let in-flight calls complete before closing IPC.
+        pending = len(client._pending)
+        if pending:
+            log.info("server.shutdown_drain", pending_calls=pending, timeout_s=_SHUTDOWN_DRAIN_TIMEOUT)
+            await client.drain(timeout=_SHUTDOWN_DRAIN_TIMEOUT)
+        log.info("server.shutdown_start")
         await client.stop()
+        log.info("server.shutdown_complete")
 
 
 def main() -> None:
