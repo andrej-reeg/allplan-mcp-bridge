@@ -30,10 +30,12 @@ Run the install script from the repository root. It will auto-detect the Allplan
 python scripts\install_pythonpart.py
 ```
 
-If auto-detection fails (e.g. custom Allplan install path):
+If auto-detection fails (e.g. custom Allplan install path), pass both directories explicitly:
 
 ```powershell
-python scripts\install_pythonpart.py --target-dir "C:\ProgramData\Nemetschek\Allplan\2026\PythonParts"
+python scripts\install_pythonpart.py `
+  --scripts-dir "C:\ProgramData\Nemetschek\Allplan\2026\PythonParts" `
+  --library-dir "C:\Users\<user>\Documents\Nemetschek\Allplan\2026\Usr\Local\PythonParts"
 ```
 
 The script copies:
@@ -51,7 +53,7 @@ The script is **idempotent** — re-running it only updates files that have chan
 1. Launch Allplan 2026.
 2. Open any project/drawing.
 3. In the **Script PythonParts** toolbox (or search the command bar), find and activate **AllplanMcpBridge**.
-4. A palette should appear showing "Bridge running on `\\.\pipe\allplan-mcp-bridge`".
+4. A palette should appear showing "Bridge running on `127.0.0.1:49152`".
 
 If the palette shows an error, check the Allplan Python console for log output from `allplan_agent`.
 
@@ -62,13 +64,10 @@ If the palette shows an error, check the Allplan Python console for log output f
 In a separate terminal (outside Allplan):
 
 ```powershell
-# Named pipe (default, Windows)
-uv run python -m allplan_mcp_server
-
-# TCP fallback (if named pipe has permission issues)
-$env:ALLPLAN_MCP_IPC_TRANSPORT = "tcp"
 uv run python -m allplan_mcp_server
 ```
+
+TCP is the default transport. No environment variables required for a standard install.
 
 You should see in the logs:
 ```json
@@ -89,16 +88,17 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
     "allplan": {
       "command": "uv",
       "args": ["run", "python", "-m", "allplan_mcp_server"],
-      "cwd": "C:\\path\\to\\allplan-mcp-bridge",
-      "env": {
-        "ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT": "C:\\Projects\\Allplan"
-      }
+      "cwd": "C:\\path\\to\\allplan-mcp-bridge"
     }
   }
 }
 ```
 
-**Required environment variable:** `ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT` must point to your Allplan project root. IFC import/export paths are validated against this root.
+`ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT` is auto-detected from your Allplan installation (looks for `Documents\Nemetschek\Allplan\<version>\Usr\Local`). Set it explicitly if IFC import/export paths are rejected:
+
+```json
+"env": { "ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT": "C:\\Projects\\Allplan" }
+```
 
 ---
 
@@ -124,9 +124,9 @@ All settings use the `ALLPLAN_MCP_` prefix. They can be set as environment varia
 
 | Variable | Default | Description |
 |---|---|---|
-| `ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT` | *(required)* | Root path for IFC file allowlist |
-| `ALLPLAN_MCP_IPC_TRANSPORT` | `named_pipe` | `named_pipe` or `tcp` |
-| `ALLPLAN_MCP_PIPE_NAME` | `\\.\pipe\allplan-mcp-{session_id}` | Named pipe path |
+| `ALLPLAN_MCP_ALLPLAN_WORKSPACE_ROOT` | *(auto-detected)* | Root path for IFC file allowlist |
+| `ALLPLAN_MCP_IPC_TRANSPORT` | `tcp` | `tcp` or `named_pipe` |
+| `ALLPLAN_MCP_PIPE_NAME` | `\\.\pipe\allplan-mcp-bridge` | Named pipe path (if transport=named_pipe) |
 | `ALLPLAN_MCP_TCP_HOST` | `127.0.0.1` | TCP host (loopback only) |
 | `ALLPLAN_MCP_TCP_PORT` | `49152` | TCP port |
 | `ALLPLAN_MCP_REQUEST_TIMEOUT_SECONDS` | `10.0` | Timeout for standard operations |
@@ -176,8 +176,8 @@ Then restart Allplan and reactivate the PythonPart.
 
 **`ipc.connect_failed` in MCP server logs**
 - Confirm the Allplan PythonPart palette is visible and shows "running".
-- Check pipe name in `bridge_config.json` matches `ALLPLAN_MCP_PIPE_NAME`.
-- Try TCP transport as a fallback.
+- Verify `ALLPLAN_MCP_TCP_PORT` (default 49152) is not blocked by a firewall.
+- Check `bridge_config.json` has `"force_tcp": true` — regenerate with `scripts\install_pythonpart.py`.
 
 **Wall created but attributes not set**
 - This indicates a partial failure. Check Allplan undo history — the wall should have been rolled back if attribute setting failed.
