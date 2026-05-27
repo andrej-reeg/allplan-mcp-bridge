@@ -436,6 +436,13 @@ class McpBridgeInteractor:
                         elem = build_wall_element(spec)
                         model_ele_list.append(elem)
                         _dlog("_insert_pending: wall element built OK")
+                    elif kind == "column":
+                        from allplan_agent.handlers.geometry import (
+                            build_column_element,  # noqa: PLC0415
+                        )
+                        elem = build_column_element(spec)
+                        model_ele_list.append(elem)
+                        _dlog("_insert_pending: column element built OK")
                     else:
                         _log.warning("bridge._insert_pending: unknown spec kind %r", kind)
                 except Exception as exc:

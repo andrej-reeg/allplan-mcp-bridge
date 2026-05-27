@@ -354,6 +354,61 @@ def handle_create_slab(args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def build_column_element(spec: ColumnSpec) -> Any:
+    """Build a column (box) element from spec. Called from IFW callback context.
+
+    Column is axis-aligned: base is the bottom-centre point; the box extends
+    +/- width/2 in X, +/- depth/2 in Y, and height upward in Z.
+    Same 3-attempt strategy as _wall_as_model_element.
+    """
+    base = _pt(spec.base)
+    w = float(spec.width_mm)
+    d = float(spec.depth_mm)
+    h = float(spec.height_mm)
+    half_w, half_d = w / 2.0, d / 2.0
+
+    geo = None
+
+    # 1. BRep3D.CreateCuboid with AxisPlacement3D — origin at box corner (min x/y).
+    try:
+        origin = AllplanGeo.Point3D(base.X - half_w, base.Y - half_d, base.Z)
+        x_axis = AllplanGeo.Vector3D(1.0, 0.0, 0.0)
+        z_axis = AllplanGeo.Vector3D(0.0, 0.0, 1.0)
+        placement = AllplanGeo.AxisPlacement3D(origin, x_axis, z_axis)
+        geo = AllplanGeo.BRep3D.CreateCuboid(placement, w, d, h)
+        _log.debug("build_column: attempt 1 (BRep3D+AxisPlacement3D) OK")
+    except Exception as exc:
+        _log.warning("build_column: attempt 1 (BRep3D+AxisPlacement3D) FAILED: %s", exc)
+
+    # 2. Polyhedron3D 2-point AABB.
+    if geo is None:
+        try:
+            pt_min = AllplanGeo.Point3D(base.X - half_w, base.Y - half_d, base.Z)
+            pt_max = AllplanGeo.Point3D(base.X + half_w, base.Y + half_d, base.Z + h)
+            geo = AllplanGeo.Polyhedron3D.CreateCuboid(pt_min, pt_max)
+            _log.debug("build_column: attempt 2 (Polyhedron3D 2-pt AABB) OK")
+        except Exception as exc:
+            _log.warning("build_column: attempt 2 (Polyhedron3D 2-pt AABB) FAILED: %s", exc)
+
+    # 3. Polyhedron3D at origin + Move.
+    if geo is None:
+        try:
+            geo = AllplanGeo.Polyhedron3D.CreateCuboid(w, d, h)
+            offset = AllplanGeo.Vector3D(base.X - half_w, base.Y - half_d, base.Z)
+            geo = AllplanGeo.Move(geo, offset)
+            _log.debug("build_column: attempt 3 (Move) OK")
+        except Exception as exc:
+            _log.warning("build_column: attempt 3 (Move) FAILED: %s", exc)
+            geo = AllplanGeo.Polyhedron3D.CreateCuboid(w, d, h)
+            _log.error("build_column: ALL placement attempts failed — inserting at origin")
+
+    common_props = _common_props(spec.layer)
+    model_ele_cls = getattr(AllplanElements, "ModelElement3D", None)
+    if model_ele_cls is None:
+        raise AllplanApiError("ModelElement3D not available in AllplanElements")
+    return model_ele_cls(common_props, geo)
+
+
 @command("create_column")
 def handle_create_column(args: dict[str, Any]) -> dict[str, Any]:
     spec = ColumnSpec.model_validate(args)
@@ -370,9 +425,11 @@ def handle_create_column(args: dict[str, Any]) -> dict[str, Any]:
             raise AllplanApiError(f"create_column (fake) failed: {exc}", exc) from exc
         _log.info("geometry.create_column (fake) uuid=%s", elem.uuid)
         return ElementRef(uuid=elem.uuid, kind="column").model_dump()
-    raise AllplanApiError(
-        "create_column: real Allplan API not yet implemented."
-    )
+
+    uuid_str = str(_uuid_mod.uuid4())
+    queue_spec("column", spec)
+    _log.info("geometry.create_column queued spec uuid=%s", uuid_str)
+    return ElementRef(uuid=uuid_str, kind="column").model_dump()
 
 
 @command("create_beam")
