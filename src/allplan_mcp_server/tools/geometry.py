@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from .. import element_cache
 from ..models.geometry import BeamSpec, ColumnSpec, Point3D, SlabSpec, WallSpec
 from ..models.references import ElementKind
 from ..server import get_client, get_settings, mcp
@@ -26,9 +27,10 @@ async def create_wall(
         axis_offset_mm=axis_offset_mm,
     )
     s = get_settings()
-    return await get_client().call(
-        "create_wall", spec.model_dump(mode="json"), timeout=s.request_timeout_seconds
-    )
+    spec_dict = spec.model_dump(mode="json")
+    result = await get_client().call("create_wall", spec_dict, timeout=s.request_timeout_seconds)
+    element_cache.store(result["uuid"], "wall", spec_dict)
+    return result
 
 
 @mcp.tool()
@@ -40,9 +42,10 @@ async def create_slab(
     """Create a slab element from a polygon outline. Minimum 3 points. Units: mm."""
     spec = SlabSpec(outline=outline, thickness_mm=thickness_mm, layer=layer)
     s = get_settings()
-    return await get_client().call(
-        "create_slab", spec.model_dump(mode="json"), timeout=s.request_timeout_seconds
-    )
+    spec_dict = spec.model_dump(mode="json")
+    result = await get_client().call("create_slab", spec_dict, timeout=s.request_timeout_seconds)
+    element_cache.store(result["uuid"], "slab", spec_dict)
+    return result
 
 
 @mcp.tool()
@@ -62,9 +65,12 @@ async def create_column(
         layer=layer,
     )
     s = get_settings()
-    return await get_client().call(
-        "create_column", spec.model_dump(mode="json"), timeout=s.request_timeout_seconds
+    spec_dict = spec.model_dump(mode="json")
+    result = await get_client().call(
+        "create_column", spec_dict, timeout=s.request_timeout_seconds
     )
+    element_cache.store(result["uuid"], "column", spec_dict)
+    return result
 
 
 @mcp.tool()
@@ -84,9 +90,10 @@ async def create_beam(
         layer=layer,
     )
     s = get_settings()
-    return await get_client().call(
-        "create_beam", spec.model_dump(mode="json"), timeout=s.request_timeout_seconds
-    )
+    spec_dict = spec.model_dump(mode="json")
+    result = await get_client().call("create_beam", spec_dict, timeout=s.request_timeout_seconds)
+    element_cache.store(result["uuid"], "beam", spec_dict)
+    return result
 
 
 @mcp.tool()
